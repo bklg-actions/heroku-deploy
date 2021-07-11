@@ -1,13 +1,28 @@
-name: 'Wait'
-description: 'Wait a designated number of milliseconds'
+name: 'heroku-deploy'
+description: 'GitHub Action that deploys your branch to a new or existing Heroku application.'
 inputs:
-  milliseconds:  # id of input
-    description: 'number of milliseconds to wait'
+  add_ons:
+    description: 'List of add-ons separated by spaces to specify when creating the application'
+    required: false
+  application_name:
+    description: 'Name of the application to create or update'
     required: true
-    default: '1000'
+  branch_name:
+    description: 'Name of the branch to deploy to the application'
+    required: true
+  region:
+    description: 'Region in which the application should be created'
+    required: false
+    default: 'eu'
 outputs:
-  time: # output will be available to future steps
-    description: 'The message to output'
+  performed:
+    description: 'The action performed while deploying, "create" or "update"'
+  application_name:
+    description: 'Name of the application that was created or updated'
+  application_url:
+    description: 'URL of the deployed application, if is_success is true'
+  success:
+    description: 'If the deployment completed successfully'
 runs:
   using: 'node12'
   main: 'dist/index.js'
