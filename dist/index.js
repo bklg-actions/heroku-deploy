@@ -1,31 +1,26 @@
-require('./sourcemap-register.js');module.exports =
-/******/ (() => { // webpackBootstrap
+require('./sourcemap-register.js');/******/ (() => { // webpackBootstrap
 /******/ 	var __webpack_modules__ = ({
 
-/***/ 932:
-/***/ ((__unused_webpack_module, __unused_webpack_exports, __nccwpck_require__) => {
+/***/ 532:
+/***/ ((module, __unused_webpack_exports, __nccwpck_require__) => {
 
-const core = __nccwpck_require__(186);
-const wait = __nccwpck_require__(258);
+const child_process = __nccwpck_require__(129);
 
-
-// most @actions toolkit packages have async methods
-async function run() {
-  try {
-    const ms = core.getInput('milliseconds');
-    core.info(`Waiting ${ms} milliseconds ...`);
-
-    core.debug((new Date()).toTimeString()); // debug is only output if you set the secret `ACTIONS_RUNNER_DEBUG` to true
-    await wait(parseInt(ms));
-    core.info((new Date()).toTimeString());
-
-    core.setOutput('time', new Date().toTimeString());
-  } catch (error) {
-    core.setFailed(error.message);
-  }
+const execute = (command, args) => {
+  console.log(`${command} ${args.join(' ')}`);
+  return child_process.spawnSync(command, args, {
+    stdio: ['ignore', process.stdout, process.stderr]
+  });
 }
 
-run();
+const executeCapture = (command, args) => {
+  return child_process.spawnSync(command, args);
+}
+
+module.exports = {
+  execute,
+  executeCapture
+};
 
 
 /***/ }),
@@ -423,20 +418,11 @@ exports.toCommandValue = toCommandValue;
 
 /***/ }),
 
-/***/ 258:
+/***/ 129:
 /***/ ((module) => {
 
-let wait = function (milliseconds) {
-  return new Promise((resolve) => {
-    if (typeof milliseconds !== 'number') {
-      throw new Error('milliseconds not a number');
-    }
-    setTimeout(() => resolve("done!"), milliseconds)
-  });
-};
-
-module.exports = wait;
-
+"use strict";
+module.exports = require("child_process");;
 
 /***/ }),
 
@@ -472,8 +458,9 @@ module.exports = require("path");;
 /******/ 	// The require function
 /******/ 	function __nccwpck_require__(moduleId) {
 /******/ 		// Check if module is in cache
-/******/ 		if(__webpack_module_cache__[moduleId]) {
-/******/ 			return __webpack_module_cache__[moduleId].exports;
+/******/ 		var cachedModule = __webpack_module_cache__[moduleId];
+/******/ 		if (cachedModule !== undefined) {
+/******/ 			return cachedModule.exports;
 /******/ 		}
 /******/ 		// Create a new module (and put it into the cache)
 /******/ 		var module = __webpack_module_cache__[moduleId] = {
@@ -498,11 +485,119 @@ module.exports = require("path");;
 /************************************************************************/
 /******/ 	/* webpack/runtime/compat */
 /******/ 	
-/******/ 	__nccwpck_require__.ab = __dirname + "/";/************************************************************************/
-/******/ 	// module exports must be returned from runtime so entry inlining is disabled
-/******/ 	// startup
-/******/ 	// Load entry module and return exports
-/******/ 	return __nccwpck_require__(932);
+/******/ 	if (typeof __nccwpck_require__ !== 'undefined') __nccwpck_require__.ab = __dirname + "/";/************************************************************************/
+var __webpack_exports__ = {};
+// This entry need to be wrapped in an IIFE because it need to be isolated against other modules in the chunk.
+(() => {
+const core = __nccwpck_require__(186);
+const { execute, executeCapture } = __nccwpck_require__(532);
+
+const addRemote = ({ applicationName }) => {
+  execute('heroku', ['git:remote', `--app=${applicationName}`])
+};
+
+const createApplication = ({ applicationName, region, addOns }) => {
+  if (execute('heroku', ['apps:info', `--app=${applicationName}`]).status !== 0) {
+    let args = ['apps:create', `--app=${applicationName}`];
+
+    if (region) {
+      args.push(`--region=${region}`);
+    }
+
+    if (addOns) {
+      args.push(`--addons=${addOns.split(/\s+/).join(',')}`);
+    }
+
+    if (execute('heroku', args).status === 0) {
+      core.setOutput('performed', 'create');
+    }
+  } else {
+    core.setOutput('performed', 'update');
+  }
+}
+
+const parseConfigOutput = (data) => {
+  const variablePattern = /^([A-Z_]+)[=:]\s*(.+)$/;
+
+  return data.split("\n").reduce((result, line) => {
+    const match = line.match(variablePattern);
+    if (match) {
+      result[match[1]] = match[2];
+    }
+
+    return result;
+  }, {});
+}
+
+const configureApplication = ({ applicationName, environmentVariables }) => {
+  const result = executeCapture('heroku', ['config', `--app=${applicationName}`])
+
+  if (result.status === 1) {
+    throw "Couldn't retrieve the current environment variables for the application."
+  }
+
+  const currentVariables = parseConfigOutput(result.output.toString());
+
+  for (const [variable, value] of Object.entries(environmentVariables)) {
+    if (!(variable in currentVariables)) {
+      execute('heroku', ['config:set', `${variable}=${value}`, `--app=${applicationName}`]);
+    }
+  }
+}
+
+const deployBranch = () => {
+  return execute('git', ['push', 'heroku', 'HEAD:master', '--force']);
+}
+
+const getEnvironmentVariables = () => {
+  const variables = process.env;
+  const pattern = /^ENV__(.+)/;
+
+  return Object
+    .keys(variables)
+    .filter((key) => {
+      return pattern.test(key);
+    })
+    .reduce((object, key) => {
+      const match = key.match(pattern);
+      object[match[1]] = variables[key];
+      return object;
+    }, {});
+}
+
+async function run() {
+  try {
+    let config = {
+      addOns: core.getInput('add_ons'),
+      applicationName: core.getInput('application_name'),
+      branchName: core.getInput('branch_name'),
+      environmentVariables: getEnvironmentVariables(),
+      region: core.getInput('region'),
+    };
+
+    createApplication(config);
+    configureApplication(config);
+    addRemote(config);
+
+    core.setOutput('application_name', config.applicationName);
+
+    if (deployBranch(config).status === 0) {
+      core.setOutput('application_url', `https://${config.applicationName}.herokuapp.com`);
+      core.setOutput('success', true);
+    } else {
+      throw 'Failed to push the branch to the Heroku remote.';
+    }
+  } catch (error) {
+    core.setOutput('success', false);
+    core.setFailed(error.message);
+  }
+}
+
+run();
+
+})();
+
+module.exports = __webpack_exports__;
 /******/ })()
 ;
 //# sourceMappingURL=index.js.map
