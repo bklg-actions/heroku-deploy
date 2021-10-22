@@ -496,7 +496,7 @@ const addRemote = ({ applicationName }) => {
   execute('heroku', ['git:remote', `--app=${applicationName}`])
 };
 
-const createApplication = ({ applicationName, region, addOns }) => {
+const createApplication = ({ applicationName, region, addOns, buildPacks }) => {
   if (execute('heroku', ['apps:info', `--app=${applicationName}`]).status !== 0) {
     let args = ['apps:create', `--app=${applicationName}`];
 
@@ -509,6 +509,14 @@ const createApplication = ({ applicationName, region, addOns }) => {
     }
 
     if (execute('heroku', args).status === 0) {
+      if (buildPacks) {
+        buildPacks.split(/\s+/).forEach((buildPack) => {
+          if (execute('heroku', ['buildpacks:add', buildPack, `--app=${applicationName}`]).status !== 0) {
+            throw `Couldn't add build-pack '${buildPack}'.`
+          }
+        });
+      }
+
       core.setOutput('performed', 'create');
     }
   } else {
@@ -571,6 +579,7 @@ async function run() {
       addOns: core.getInput('add_ons'),
       applicationName: core.getInput('application_name'),
       branchName: core.getInput('branch_name'),
+      buildPacks: core.getInput('build_packs'),
       environmentVariables: getEnvironmentVariables(),
       region: core.getInput('region'),
     };
